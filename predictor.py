@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-Financial Price Prediction Tool
-================================
-Uses LSTM neural networks to predict financial asset prices.
-Fetches data via yfinance, engineers features (RSI, 7-day MA),
-applies a sliding-window approach, and forecasts future prices.
-"""
-
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -19,9 +10,6 @@ from tensorflow.keras.callbacks import EarlyStopping
 import warnings
 
 warnings.filterwarnings("ignore")
-
-
-# ──────────────────────────── helpers ────────────────────────────
 
 def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     """Compute the Relative Strength Index."""
@@ -41,8 +29,6 @@ def fetch_data(ticker: str, start: str, end: str) -> pd.DataFrame:
     df = yf.download(ticker, start=start, end=end, progress=False)
     if df.empty:
         raise ValueError("No data returned. Check the ticker symbol and date range.")
-
-    # Flatten MultiIndex columns if present (yfinance >= 0.2)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
@@ -53,10 +39,8 @@ def fetch_data(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
-# ──────────────── sliding-window dataset builder ─────────────────
-
-WINDOW = 60  # look-back window (days)
-HORIZON = 1  # predict next N days
+WINDOW = 60 
+HORIZON = 1  
 
 
 def build_datasets(df: pd.DataFrame, feature_cols: list[str], target_col: str = "Close"):
@@ -66,8 +50,6 @@ def build_datasets(df: pd.DataFrame, feature_cols: list[str], target_col: str = 
     """
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(df[feature_cols].values)
-
-    # Separate scaler for the target so we can inverse-transform predictions
     target_idx = feature_cols.index(target_col)
     target_scaler = MinMaxScaler()
     target_scaler.fit(df[[target_col]].values)
@@ -75,24 +57,19 @@ def build_datasets(df: pd.DataFrame, feature_cols: list[str], target_col: str = 
     X, y = [], []
     for i in range(WINDOW, len(scaled) - HORIZON + 1):
         X.append(scaled[i - WINDOW : i])
-        y.append(scaled[i, target_idx])  # next-day close (scaled)
+        y.append(scaled[i, target_idx]) 
 
     X, y = np.array(X), np.array(y)
 
     split = int(len(X) * 0.8)
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
-
-    # Dates aligned to y values
     dates = df.index[WINDOW : WINDOW + len(y)]
     train_dates = dates[:split]
     test_dates = dates[split:]
 
     return (X_train, y_train, X_test, y_test,
             train_dates, test_dates, scaler, target_scaler, scaled)
-
-
-# ──────────────────────────── model ──────────────────────────────
 
 def build_model(input_shape: tuple) -> Sequential:
     """Two-layer LSTM with Dropout."""
@@ -107,9 +84,6 @@ def build_model(input_shape: tuple) -> Sequential:
     model.compile(optimizer="adam", loss="mse")
     return model
 
-
-# ────────────────────── future forecasting ───────────────────────
-
 FUTURE_DAYS = 7
 
 
@@ -121,39 +95,29 @@ def forecast_future(model, last_window: np.ndarray, target_idx: int,
     for _ in range(days):
         pred = model.predict(current[np.newaxis, :, :], verbose=0)[0, 0]
         preds.append(pred)
-        # Shift window: drop oldest row, append new row (fill non-target cols
-        # with last known values and set target col to prediction)
         new_row = current[-1].copy()
         new_row[target_idx] = pred
         current = np.vstack([current[1:], new_row])
     return np.array(preds)
-
-
-# ──────────────────────── visualisation ──────────────────────────
 
 def plot_results(df, train_dates, test_dates, y_test_actual,
                  y_pred, future_dates, future_prices, ticker):
     """Produce a publication-quality chart."""
     fig, ax = plt.subplots(figsize=(16, 7))
 
-    # Full historical close
     ax.plot(df.index, df["Close"], color="#1f77b4", linewidth=1.2,
             label="Actual Price", alpha=0.85)
 
-    # Predicted on test set
     ax.plot(test_dates, y_pred, color="#ff7f0e", linewidth=1.6,
             label="Predicted (Test)", linestyle="--")
 
-    # Future forecast
     ax.plot(future_dates, future_prices, color="#2ca02c", linewidth=2,
             label=f"Future Forecast ({FUTURE_DAYS} days)", linestyle="-.",
             marker="o", markersize=4)
 
-    # Shade test region
     ax.axvspan(test_dates[0], test_dates[-1], alpha=0.06, color="orange",
                label="Test Period")
 
-    # Formatting
     ax.set_title(f"{ticker}  —  LSTM Price Prediction & 7-Day Forecast",
                  fontsize=15, fontweight="bold")
     ax.set_xlabel("Date", fontsize=12)
@@ -169,28 +133,18 @@ def plot_results(df, train_dates, test_dates, y_test_actual,
     print(f"\n📊  Chart saved to {out_path}")
     plt.show()
 
-
-# ──────────────────────────── main ───────────────────────────────
-
 def main():
-    # ── 1. User Inputs ──
     ticker = input("Enter ticker symbol (e.g. BTC-USD, AAPL): ").strip()
     start_date = input("Enter start date (YYYY-MM-DD): ").strip()
     end_date = input("Enter end date   (YYYY-MM-DD): ").strip()
-
-    # ── 2. Fetch & engineer features ──
     df = fetch_data(ticker, start_date, end_date)
     feature_cols = ["Close", "Volume", "MA_7", "RSI_14"]
-
-    # ── 3. Build sliding-window datasets ──
     (X_train, y_train, X_test, y_test,
      train_dates, test_dates,
      scaler, target_scaler, scaled) = build_datasets(df, feature_cols)
 
     print(f"\n🔢  Training samples : {len(X_train)}")
     print(f"🔢  Testing samples  : {len(X_test)}")
-
-    # ── 4. Build & train LSTM ──
     model = build_model((X_train.shape[1], X_train.shape[2]))
     model.summary()
 
@@ -206,8 +160,6 @@ def main():
         callbacks=[early_stop],
         verbose=1,
     )
-
-    # ── 5. Evaluate on test set ──
     y_pred_scaled = model.predict(X_test, verbose=0).flatten()
     y_pred = target_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
     y_test_actual = target_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
@@ -216,8 +168,6 @@ def main():
     mape = np.mean(np.abs((y_test_actual - y_pred) / y_test_actual)) * 100
     print(f"\n📈  Test MAE  : {mae:,.2f}")
     print(f"📈  Test MAPE : {mape:.2f}%")
-
-    # ── 6. Future 7-day forecast ──
     target_idx = feature_cols.index("Close")
     last_window = scaled[-WINDOW:]
     future_scaled = forecast_future(model, last_window, target_idx,
@@ -232,8 +182,6 @@ def main():
     print(f"\n🔮  7-Day Forecast from {future_dates[0].strftime('%Y-%m-%d')}:")
     for d, p in zip(future_dates, future_prices):
         print(f"    {d.strftime('%Y-%m-%d')}  →  ${p:,.2f}")
-
-    # ── 7. Plot ──
     plot_results(df, train_dates, test_dates, y_test_actual,
                  y_pred, future_dates, future_prices, ticker)
 
